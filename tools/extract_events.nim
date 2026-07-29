@@ -96,6 +96,14 @@ type
     resultsJson*: string       ## playerResultsJson at the final tick.
     slotShotsFired*: seq[int]  ## final in-sim accuracy counters by slot.
     slotShotsHit*: seq[int]
+    slotAddress*: seq[string]  ## each slot's recorded join name. A hosted
+                               ## league replay records the league player name
+                               ## here, so attribution never has to ASSUME a
+                               ## slot-to-entrant mapping.
+    slotTeam*: seq[string]     ## each slot's team ("red" / "blue").
+    winner*: string            ## "red" / "blue", or "" when drawn/unfinished.
+    isDraw*: bool
+    finished*: bool            ## whether the replay reached GameOver.
 
 proc extractEvents*(data: ReplayData): ExtractResult =
   ## Re-simulates one replay with the tier-2 sink on and returns every event
@@ -121,10 +129,18 @@ proc extractEvents*(data: ReplayData): ExtractResult =
     let resultSlotCount = parseJson(result.resultsJson)["names"].len
     result.slotShotsFired = newSeq[int](resultSlotCount)
     result.slotShotsHit = newSeq[int](resultSlotCount)
+    result.slotAddress = newSeq[string](resultSlotCount)
+    result.slotTeam = newSeq[string](resultSlotCount)
     for player in sim.players:
       if player.joinOrder >= 0 and player.joinOrder < resultSlotCount:
         result.slotShotsFired[player.joinOrder] = player.shotsFired
         result.slotShotsHit[player.joinOrder] = player.shotsHit
+        result.slotAddress[player.joinOrder] = player.address
+        result.slotTeam[player.joinOrder] = teamText(player.team)
+    result.finished = sim.phase == GameOver
+    result.isDraw = sim.isDraw
+    if result.finished and not sim.isDraw:
+      result.winner = teamText(sim.winner)
   finally:
     setCurrentDir(previousDir)
 
@@ -140,6 +156,15 @@ proc extractEventsJsonl*(data: ReplayData): string =
   summary["ticks"] = %extraction.ticks
   summary["events"] = %extraction.events.len
   summary["gameVersion"] = %GameVersion
+  summary["finished"] = %extraction.finished
+  summary["draw"] = %extraction.isDraw
+  summary["winner"] = %extraction.winner
+  # The roster travels WITH the events so a scan of the JSONL alone can
+  # attribute every slot without re-reading the league API.
+  summary["slot_address"] = %extraction.slotAddress
+  summary["slot_team"] = %extraction.slotTeam
+  summary["slot_shots_fired"] = %extraction.slotShotsFired
+  summary["slot_shots_hit"] = %extraction.slotShotsHit
   lines.add($summary)
   lines.join("\n") & "\n"
 

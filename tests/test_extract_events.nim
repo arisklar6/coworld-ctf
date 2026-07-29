@@ -1,5 +1,5 @@
 import
-  std/[json, os, unittest],
+  std/[json, os, strutils, unittest],
   ctf/[replays, sim],
   "../tools/extract_events"
 
@@ -145,6 +145,43 @@ suite "tier-2 event extraction (tools/extract_events)":
       for field in ["tick", "kind", "source", "target", "weapon", "amount",
           "hp", "x", "y"]:
         check row.hasKey(field)
+
+  test "the summary carries a self-describing roster and outcome":
+    # Ladder scouting attributes every event to an entrant by the join name
+    # RECORDED IN THE REPLAY, never an assumed slot mapping — so the roster and
+    # the outcome have to travel with the event stream.
+    let
+      data = loadReplay(EventsFixture)
+      extraction = extractEvents(data)
+      slotCount = parseJson(extraction.resultsJson)["names"].len
+
+    check extraction.slotAddress.len == slotCount
+    check extraction.slotTeam.len == slotCount
+    # Slot parity picks the team: a hosted head-to-head episode seats one
+    # entrant on the even slots and the other on the odd ones.
+    check extraction.slotTeam[0] != extraction.slotTeam[1]
+    for slot in 0 ..< slotCount:
+      check extraction.slotTeam[slot] in ["red", "blue"]
+      check extraction.slotTeam[slot] ==
+        extraction.slotTeam[slot mod 2]
+      check extraction.slotAddress[slot].len > 0
+
+    # A finished match names exactly one winner, or is an explicit draw.
+    check extraction.finished
+    if extraction.isDraw:
+      check extraction.winner.len == 0
+    else:
+      check extraction.winner in ["red", "blue"]
+
+    var lines = extractEventsJsonl(data).strip().splitLines()
+    let summary = parseJson(lines[^1])
+    check summary["finished"].getBool == extraction.finished
+    check summary["draw"].getBool == extraction.isDraw
+    check summary["winner"].getStr == extraction.winner
+    check summary["slot_address"].len == slotCount
+    check summary["slot_team"].len == slotCount
+    check summary["slot_shots_fired"].len == slotCount
+    check summary["slot_shots_hit"].len == slotCount
 
   test "collectEvents defaults off: a live sim collects nothing":
     let previousDir = getCurrentDir()
